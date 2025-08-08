@@ -1,0 +1,88 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - "master"
+  schedule:
+    - cron: "0 5 * * 1" # Every Monday morning
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_USER: ${{ github.actor }}
+  REGISTRY_PASS: ${{ secrets.GITHUB_TOKEN }}
+  REPO: jdobes/llama.cpp
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: check-version
+      cancel-in-progress: true
+    outputs:
+      version: ${{ steps.check-version.outputs.version }}
+    steps:
+      - name: Check version
+        id: check-version
+        run: |
+          LATEST_UPSTREAM_VERSION=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r '.tag_name' | sed 's/v//')
+          LATEST_REBUILT_VERSION=$(curl -s -f -H "Authorization: Bearer $REGISTRY_PASS" https://api.github.com/users/jdobes/packages/container/llama.cpp/versions | jq -r 'sort_by(.id) | reverse | .[0].metadata.container.tags.[] | select(. != "latest")')
+          echo "LATEST_UPSTREAM_VERSION: $LATEST_UPSTREAM_VERSION"
+          echo "LATEST_REBUILT_VERSION: $LATEST_REBUILT_VERSION"
+          if [ "$LATEST_UPSTREAM_VERSION" != "$LATEST_REBUILT_VERSION" ]; then
+            echo "version=$LATEST_UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "version=" >> $GITHUB_OUTPUT
+          fi
+  build:
+    strategy:
+      matrix:
+        os: [{name: ubuntu-24.04, tag: amd64}, {name: ubuntu-24.04-arm, tag: arm64}]
+    runs-on: ${{ matrix.os.name }}
+    needs: version
+    concurrency:
+      group: build-${{ matrix.os.tag }}
+      cancel-in-progress: true
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Login to registry
+        run: |
+          echo "$REGISTRY_PASS" | podman login -u "$REGISTRY_USER" --password-stdin "$REGISTRY"
+      - name: Build and push latest version
+        run: |
+          if [ "$VERSION" != "" ]; then
+              podman build -t llama.cpp --build-arg RELEASE=$VERSION .
+              podman push llama.cpp docker://$REGISTRY/$REPO:$VERSION-${{ matrix.os.tag }}
+              podman push llama.cpp docker://$REGISTRY/$REPO:latest-${{ matrix.os.tag }}
+          else
+              echo "Build skipped."
+          fi
+  collect:
+    runs-on: ubuntu-24.04
+    needs: [version, build]
+    concurrency:
+      group: collect
+      cancel-in-progress: true
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Login to registry
+        run: |
+          echo "$REGISTRY_PASS" | podman login -u "$REGISTRY_USER" --password-stdin "$REGISTRY"
+      - name: Create and push manifest with built images
+        run: |
+          if [ "$VERSION" != "" ]; then
+              podman manifest create llama.cpp
+              podman manifest add llama.cpp docker://$REGISTRY/$REPO:$VERSION-amd64
+              podman manifest add llama.cpp docker://$REGISTRY/$REPO:$VERSION-arm64
+              podman manifest push llama.cpp docker://$REGISTRY/$REPO:$VERSION
+              podman manifest push llama.cpp docker://$REGISTRY/$REPO:latest              
+              podman manifest rm llama.cpp
+          else
+              echo "Collection skipped."
+          fi
