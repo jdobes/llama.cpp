@@ -4,13 +4,13 @@ ARG RELEASE=b6117
 
 WORKDIR /work
 
-RUN dnf install -y cmake gcc-c++ libcurl-devel
+RUN dnf install -y cmake gcc-c++ libcurl-devel openblas-devel
 
 RUN curl -O -L https://github.com/ggml-org/llama.cpp/archive/refs/tags/${RELEASE}.tar.gz && \
     tar -xf ${RELEASE}.tar.gz && \
     rm -f ${RELEASE}.tar.gz && \
     cd llama.cpp-${RELEASE} && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF && \
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS && \
     cmake --build build --config Release -j $(nproc) --target llama-cli llama-server llama-bench
 
 # Copy required system libs to have them on one place
