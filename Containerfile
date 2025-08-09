@@ -10,7 +10,8 @@ RUN curl -O -L https://github.com/ggml-org/llama.cpp/archive/refs/tags/${RELEASE
     tar -xf ${RELEASE}.tar.gz && \
     rm -f ${RELEASE}.tar.gz && \
     cd llama.cpp-${RELEASE} && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS && \
+    if [ "$(uname -m)" == "aarch64" ]; then EXTRA_ARGS="-DGGML_CPU_ARM_ARCH=armv8-a"; else EXTRA_ARGS=""; fi && \
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS $EXTRA_ARGS && \
     cmake --build build --config Release -j $(nproc) --target llama-cli llama-server llama-bench
 
 # Copy required system libs to have them on one place
